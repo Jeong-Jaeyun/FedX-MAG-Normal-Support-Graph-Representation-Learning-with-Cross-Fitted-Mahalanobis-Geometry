@@ -1,0 +1,38 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Datasets and generated outputs (not versioned)
+/data/
+output/
+tmp/
+review_packages/
+recovery/
+*.zip
+
+# Documents (kept locally, not versioned)
+/docs/
+/documents/
+/New_Model/docs/
+/New_Model/.document_deps/
+
+# New_Model experiment outputs, frozen source snapshots and checkpoints
+/New_Model/artifacts/
+/New_Model/runs/
+/New_Model/candidates/
+/New_Model/reports/
+/New_Model/queues/
+/New_Model/experiment_sources/
+
+# Large binary safety net
+*.pt
+*.pth
+*.npy
+*.npz
+*.parquet
+*.pkl
+*.docx
+*.pdf

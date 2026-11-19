@@ -1,0 +1,75 @@
+protocol:
+  name: xiiotid_stage1_m0_v3b_independent_confirmation
+  version: 1
+  registered_on: "2026-10-24"
+  status: confirmatory
+  claim: >-
+    Under identical dependency-closed masks and exactly equal capacity, true
+    edge-aware topology improves masked reconstruction of every v3b target
+    family on untouched future normal windows beyond local, unordered
+    set-context, and both-endpoint-shuffled adjacency information.
+
+frozen_inputs:
+  base_config: configs/stage1_m0_v3_development.yaml
+  base_config_sha256: 760adb6c6c856baa84885e4c63b21623cec4bce7ce2c354dedfce2413b3efcb5
+  base_config_file_sha256: a474e2f324e36db2f3944eceb6a9bf8a44592fbeb82c03ec517cad2ab5903f04
+  schema_sha256: bbe7eb0b180cf887b5fec6e2142dc6c4cc73b61e538493d480ea7a048ffb80ea
+  preprocessing_code_sha256: 84a939f25b1da1f3fb54c32bbfd6728afc7c575627e4b7c1bae3837db1e71f6a
+  training_code_sha256: 23dc56421c4f0775afebb7e03d89cefc611611717975f31cf1b7ad7558b3ff4b
+  raw_input_sha256: 7b9290057ee42e784da3c0d84b781815502c9205c74175c96374e71a5ffd98a0
+
+data:
+  prepared_dir: data/processed/xiiotid_stage1_v3b_development
+  roles:
+    fit: train_normal.pt
+    early_stopping: select_normal.pt
+    confirmation: calibration_normal.pt
+  never_opened_by_this_protocol:
+    - audit_normal.pt
+    - test_normal.pt
+    - test_attack.pt
+  file_sha256:
+    train_normal.pt: e3cc94714a3719751dd16fa46b044afc7dd37f9bfb0635b00bd4e1e0f338f860
+    select_normal.pt: 89a405b96367420b04f3260acc1044576482434449a578b52ac4d6796035644f
+    calibration_normal.pt: c2c5abc7979688f420dc05fcd20949fbaf078e1dc52b0c5266856d55ad00c9d4
+    manifest.json: bf59c142fde4cad83dff325bac039c1d417f401f6ffd8384b2493c8419f1303c
+    preflight.json: 87493c6df950962a4ba2953ebd8716167c0f0ab4ef97ed8e93f0a8b14aa932e6
+    standardizer.pt: 9e12ca3bd09d8e7afe62d7cb946b2684d1b615b70fca953b8118be52ab910924
+
+# Copied from the base configuration and re-asserted by the runner.
+model_seeds: [17, 29, 41, 53, 67]
+confirmation_mask_seeds: [1000003, 1000033, 1000037, 1000039, 1000081, 1000099,
+  1000117, 1000121, 1000133, 1000151, 1000159, 1000171, 1000183,
+  1000187, 1000193, 1000199, 1000211, 1000213, 1000231, 1000249,
+  1000253, 1000273, 1000289, 1000291, 1000303]
+predictors: [local, set_context, shuffled_graph, graph]
+
+support_requirements:
+  minimum_confirmation_normal_graphs: 100
+  minimum_mask_target_rate_per_family: 0.001
+  minimum_mask_stratum_available_scalars: 100
+  minimum_target_scalars_per_degree_stratum_across_masks: 100
+  minimum_target_graphs_per_degree_stratum_across_masks: 30
+
+gates:
+  minimum_graph_gain_over_local: 0.05
+  minimum_graph_gain_over_set_context: 0.05
+  minimum_graph_gain_over_shuffled_graph: 0.05
+  require_graph_better_than_constant: true
+  maximum_standardized_graph_mse: 1.0
+
+decision_rule: >-
+  For each family, MSE is the graph-balanced masked MSE on the confirmation
+  partition, averaged over the 25 confirmation masks and then over the five
+  model seeds; Constant is evaluated once on the same masks. A family passes
+  only if Graph beats Constant, Graph MSE is at most 1.0, and Graph improves
+  by at least 5% over Local, Set-context, and Shuffled graph separately. M0
+  passes only if all four families pass. No family may be removed, no gate
+  may be changed, and no model, mask, seed, or feature may be re-selected
+  after the confirmation partition is opened.
+
+secondary_descriptive_analyses:
+  bootstrap_resamples: 2000
+  bootstrap_seed: 20261024
+  bootstrap_cluster: session_key
+  interval: 0.95

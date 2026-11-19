@@ -1,0 +1,101 @@
+experiment:
+  name: xiiotid_stage1_m0
+  seeds: [17, 29, 41]
+  stage: M0
+  temporal_length: 1
+  score_regime: closed_window
+
+data:
+  dataset: xiiotid
+  window_seconds: 60
+  window_stride_seconds: 60
+  split_before_windowing: true
+  deduplicate_exact_rows: true
+  session_split_strategy: within_session_chronological
+  split_fractions:
+    train: 0.50
+    select: 0.10
+    audit: 0.10
+    calibration: 0.15
+    test: 0.15
+  attack_use: final_test_only
+
+features:
+  node:
+    timing:
+      - log1p_out_record_iat_mean_ms
+      - log1p_out_record_iat_std_ms
+      - out_record_burstiness
+      - log1p_out_record_idle_p95_ms
+      - log1p_in_record_iat_mean_ms
+      - log1p_in_record_iat_std_ms
+      - in_record_burstiness
+      - log1p_in_record_idle_p95_ms
+    distribution:
+      - log1p_out_mean_packet_size_std_bytes
+      - log1p_out_mean_packet_size_iqr_bytes
+      - log1p_out_mean_packet_size_p90_bytes
+      - log1p_in_mean_packet_size_std_bytes
+      - log1p_in_mean_packet_size_iqr_bytes
+      - log1p_in_mean_packet_size_p90_bytes
+  edge:
+    timing:
+      - log1p_record_iat_mean_ms
+      - log1p_record_iat_std_ms
+      - record_burstiness
+      - log1p_record_idle_p95_ms
+    distribution:
+      - log1p_mean_packet_size_std_bytes
+      - log1p_mean_packet_size_iqr_bytes
+      - log1p_mean_packet_size_p90_bytes
+
+masking:
+  attribute_budget: 0.30
+  family_mask_probability: 0.35
+  minimum_visible_per_entity: 0
+  minimum_visible_per_graph: 1
+
+model:
+  hidden_dim: 64
+  graph_dim: 32
+  num_layers: 2
+  dropout: 0.10
+
+controls:
+  adjacency_shuffle_seed: 271828
+
+loss:
+  node_timing: 1.0
+  node_distribution: 1.0
+  edge_timing: 1.0
+  edge_distribution: 1.0
+
+training:
+  epochs: 100
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  gradient_clip_norm: 5.0
+  early_stopping_patience: 15
+  validation_mask_seeds: [100003, 100019, 100043]
+  selection_metric: validation_mask_mean_macro_family_mse
+  deterministic_algorithms: true
+  deterministic_warn_only: false
+
+audit:
+  mask_seeds: [1000003, 1000033, 1000037, 1000039, 1000081]
+  minimum_mask_target_rate_per_family: 0.001
+  minimum_mask_stratum_available_scalars: 100
+  minimum_normal_graphs:
+    train: 500
+    select: 100
+    audit: 100
+    calibration: 200
+    test: 200
+  minimum_test_attack_graphs: 500
+  maximum_reciprocal_timing_exact_match_exposure_rate: 0.01
+  minimum_graph_gain_over_local: 0.05
+  minimum_graph_gain_over_set_context: 0.05
+  minimum_graph_gain_over_shuffled_graph: 0.05
+  require_graph_better_than_constant: true
+  maximum_standardized_graph_mse: 1.0

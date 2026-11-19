@@ -1,0 +1,168 @@
+# Independent validation of the raw-node + flow kNN detector and vetted-normal
+# commissioning on TON_IoT network data. Written before any TON_IoT feature
+# distribution by label, detector score, or metric existed; hash-registered before
+# featurization. Only the label-free layout census and the per-capture record and
+# window counts (output/ton_iot_census) were seen. Every method setting is copied
+# from X-IIoTID; nothing here is tuned on TON_IoT.
+
+protocol:
+  name: ton_iot_background_contrast_validation
+  date: "2026-10-27"
+  status: confirmatory_on_untouched_data
+  question: >-
+    On a dataset never used for any choice, (1) do source-environment thresholds fail
+    to transfer to new captures, (2) does vetted-normal commissioning restore the
+    false-positive target and detect more than threshold recalibration alone, and
+    (3) does the commissioned detector detect more than traffic volume alone?
+  design_choice: >-
+    Background contrast (approved 2026-10-27). The support census showed that the
+    normal-only captures (2019-04-02..04) precede the attack captures (2019-04-23..30)
+    by three weeks and that only 122 of 5,168 attack-period windows are free of
+    attack records. Normal-day versus attack-day comparisons therefore measure the
+    period and volume shift, not attacks. Each attack-period window is scored twice:
+    all of its records (attack sample if any record is an attack) and only its
+    label-0 records (background sample, the same environment without the attacker).
+
+data:
+  source: data/TON-IoT/Processed_datasets/Processed_Network_dataset/Network_dataset_{1..23}.csv
+  table_order: numeric suffix 1..23 (chronological 1M-row chunks)
+  census: [output/ton_iot_census/layout.json, output/ton_iot_census/support.json]
+  row_rules: >-
+    label validated, exact duplicate rows over all fields and across tables dropped,
+    then bad timestamp, missing endpoint, and self-relation rows, as in
+    fedxmag.preprocessing.events (implemented in fedxmag.ton_iot)
+  capture: AEST calendar day (UTC+10 fixed offset); fixed after the label-free layout census
+  window: 60 s, UTC-minute aligned, closed per capture
+  window_label: attack if any kept record has label 1
+  graph_features: >-
+    frozen v3b builder (distinct_second_collision_v3, 1 s resolution) on forward
+    events (mean payload bytes per packet, src_bytes / src_pkts) and distribution-only
+    synthetic reverse events (dst_bytes / dst_pkts), configs/stage1_m0_v3_development.yaml
+  flow_features: >-
+    the 17 X-IIoTID flow-context columns; TCP flag rates from the Zeek conn_state
+    (fedxmag.ton_iot.FLAG_STATES; non-TCP rows carry no flags), is_with_payload =
+    src_bytes + dst_bytes > 0, Zeek service '-' counted as 'other'
+  label_use: window labels, background views, and evaluation only; never a detector input
+
+roles:
+  source_captures: ["2019-04-02", "2019-04-03", "2019-04-04"]
+  source_split: >-
+    each source capture's windows, in time order, split 50/10/10/15/15 into
+    train / selection / audit / calibration / test (label-independent)
+  target_captures: ["2019-04-23", "2019-04-24", "2019-04-25", "2019-04-26", "2019-04-27",
+                    "2019-04-28", "2019-04-29", "2019-04-30"]
+  background_sample: label-0 records of a target window, if it has at least one
+  attack_sample: all records of a target window that has an attack record
+  natural_normal: a target window without attack records is one background sample only
+  commissioning_split: >-
+    per target capture, background samples in time order; count = n // 5; the first
+    count are the reference, the next count the calibration; captures with n < 10 are
+    unsupported. Evaluation holds the windows strictly after the last calibration
+    window: their background samples (negatives) and attack samples (positives).
+    Reference and calibration windows are never evaluated.
+
+method_fixed:
+  detector: raw_node_knn_plus_flow_knn_top3_select_q95_max
+  k: 20
+  graph_scaler: FeatureStandardizer refit on source-train raw graphs
+  flow_variant_default: all
+  fpr_targets: [0.01, 0.05, 0.10]
+  primary_fpr_target: 0.05
+  thresholds: split-conformal; a target unsupported by the calibration size is reported, never capped
+  unchanged_during_commissioning: [graph scaler, flow scaler, fusion scales, k]
+
+arms:
+  source_only: source detector and source-calibration thresholds
+  recalibrated: source detector, thresholds from the pooled target calibration samples
+  commissioned: pooled target reference samples added, thresholds from the pooled target calibration samples
+  record_count: >-
+    score = log1p(kept records in the sample); thresholds from the source calibration
+    (source version) or the pooled target calibration (target version)
+  endpoint_count: same as record_count with log1p(endpoints); descriptive only
+
+metrics:
+  pooled: >-
+    sum of true positives / sum of evaluation positives and sum of false positives /
+    sum of evaluation negatives over all supported target captures, at each target
+  per_capture: [auroc, tpr, fpr, evaluation positives and negatives]
+  ranking: pooled AUROC and the oracle TPR at an evaluation FPR of 5% (descriptive)
+  safety_capture_minimum: 50  # evaluation negatives a capture needs for the per-capture FPR condition
+  bootstrap:
+    unit: target capture
+    resamples: 2000
+    seed: 20261028
+    statistic: pooled TPR difference at the 5% target, thresholds held fixed
+  binomial: one-sided exact test of H0 pooled FPR <= 5% (upper tail)
+
+primary_claims:
+  P1_shift:
+    statement: source-only thresholds do not transfer to the target captures
+    arm: source_only, flow variant all
+    reproduced: binomial p < 0.05 (pooled FPR at the 5% target above 5%)
+  P2_P3_commissioning:
+    arm: commissioned versus recalibrated, flow variant all
+    safety: >-
+      commissioned binomial p >= 0.05 AND every target capture with >= 50 evaluation
+      negatives realizes FPR <= 10%
+    benefit: pooled TPR difference (commissioned - recalibrated) > 0 with bootstrap 95% lower bound > 0
+    supported: safety and benefit
+    inconclusive: safety, difference > 0, lower bound <= 0
+    not_supported: any other outcome
+  P4_beyond_volume:
+    arm: commissioned versus record_count (target version), flow variant all
+    supported: P2 safety and pooled TPR difference > 0 with bootstrap 95% lower bound > 0
+    inconclusive: P2 safety, difference > 0, lower bound <= 0
+    not_supported: any other outcome
+  validated: >-
+    the method counts as independently validated on TON_IoT only if P2_P3 and P4 are
+    both supported (intersection-union, no multiplicity adjustment needed); P1 is a
+    replication of the failure mode, reported separately
+
+secondary:
+  S1_flow_variants:
+    candidates: [activity_flags, composition, window_relative]
+    procedure: >-
+      fit the source detector and commission with the same samples for each variant;
+      report every arm and P1 per variant
+    comparison: commissioned pooled TPR difference versus the control at the 5% target
+    multiplicity: Bonferroni over three comparisons (bootstrap interval 0.833%..99.167%)
+    adopt: >-
+      the qualifying candidate (P2 safety and Bonferroni lower bound > 0) with the
+      largest point difference becomes the recommended default; otherwise the control stays
+  S2_coverage_flags: >-
+    FPR at the 5% target on the same evaluation negatives for source_only (capture in
+    neither reference nor calibration), recalibrated (calibration only), and
+    commissioned (both); source audit and test normals for the source detector
+  S3_per_capture_commissioning: >-
+    each supported target capture commissioned alone with its own reference and
+    calibration samples; unsupported targets reported as unsupported; descriptive
+    split by calibration size >= 100 versus < 100 (minimum-size policy hypothesis)
+  S4_channels: raw-node-only and flow-only scores with their own calibration thresholds, commissioned and recalibrated
+  S5_attack_types: TPR at the 5% target per attack type (windows containing that type), commissioned and record_count
+  S6_confounded_natural_windows: >-
+    source-only scores of every target attack window against source test normals,
+    with both count baselines; reported only as a measure of the period and volume confound
+  S7_entities: >-
+    within evaluation attack samples, AUROC of commissioned raw-node entity distances
+    for endpoints of at least one attack record against all other endpoints (pooled
+    and mean per window with both classes)
+  S8_natural_normals: FPR at the 5% target on evaluation negatives that are natural normal windows
+  warm_up: >-
+    the 20/20 split already keeps the start of each capture out of calibration
+    (2026-10-27 cross-calibration diagnosis); no further warm-up rule is tested
+
+integrity_checks_before_scoring:
+  - adapter row counts equal output/ton_iot_census/support.json
+  - per-capture window, normal-window, and attack-window counts equal the census
+  - every flow matrix finite and every graph valid under the v3b schema
+  - background samples contain only label-0 records; source windows are all normal
+  - reference, calibration, and evaluation windows disjoint and in that time order per capture
+
+limitations_fixed_in_advance:
+  - background samples are label-constructed counterfactuals; TON_IoT labels tag attacker IPs (192.168.159.30-39) and times, so unlabeled attack side effects can remain in them
+  - an attack sample always holds at least the records of its background sample, which is why record_count is a mandatory comparator
+  - eight target captures limit the capture bootstrap
+  - one dataset family (Zeek conn logs) and one testbed
+
+amendments: software failures only (crash or nonfinite score), recorded before any rerun; no setting changes after any score exists
+outputs: output/ton_iot_validation_20261027

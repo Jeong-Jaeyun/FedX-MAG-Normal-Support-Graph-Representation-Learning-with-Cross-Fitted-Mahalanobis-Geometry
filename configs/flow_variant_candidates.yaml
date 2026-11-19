@@ -1,0 +1,75 @@
+# Flow-channel candidates for the next independent, capture-disjoint protocol.
+# Fixed and hash-registered before any variant score was computed. Every candidate
+# carries forward unchanged to the new-data protocol. The consumed-data
+# characterization below describes the candidates; it selects, drops, or tunes none.
+
+protocol:
+  name: flow_variant_candidate_registration
+  date: "2026-10-27"
+  status: candidate_registration_with_descriptive_consumed_data_characterization
+  motivation: >-
+    On the consumed audit band, 7 of 10 false positives at the 5% target came from
+    the flow channel alone (raw-node channel below threshold). Capture-disjoint
+    ablations (2026-10-26) showed absolute activity, duration, and byte axes shift
+    between capture environments.
+
+candidates:
+  all:
+    role: control (current detector)
+    columns: all 17 flow features
+  activity_flags:
+    role: candidate
+    columns: [log_records, is_syn_only, FIN or RST, is_with_payload, is_pure_ack,
+              Is_SYN_ACK, log_duration, log_src_bytes, log_dst_bytes]
+    provenance: >-
+      best flow ablation in the earlier capture-fold check; chosen after seeing
+      consumed data, so its consumed-data numbers are optimistic
+  composition:
+    role: candidate
+    columns: [tcp, udp, icmp, svc_dns, svc_http, svc_other, is_syn_only, FIN or RST,
+              is_with_payload, is_pure_ack, Is_SYN_ACK, privileged_port]
+    rationale: shares and rates only; drops every absolute-scale feature
+  window_relative:
+    role: candidate
+    transform: >-
+      log_records, log_duration, log_dst_ports, log_src_bytes, log_dst_bytes minus
+      their (lower) median over the window's edges; other 12 columns unchanged
+    rationale: >-
+      cancels environment-wide activity level while keeping edges that are
+      outliers relative to the same window
+
+method_fixed:
+  detector: raw_node_knn_plus_flow_knn_top3_select_q95_max
+  k: 20
+  raw_node_channel: unchanged for every candidate
+  flow_scaler: refit on the transformed train-normal flow rows of each candidate
+  fusion_scales: select-normal q95 per candidate; thresholds from calibration-normal
+
+characterization:
+  data: consumed X-IIoTID only; nothing here is confirmatory
+  original_split:
+    fit: train / selection / calibration normal (same files as the 2026-10-26 study)
+    report: [test and audit AUROC, TPR/FPR at 1/5/10% targets, flow-only false
+             positives at 5%, per-capture FPR at 5%]
+  capture_folds:
+    folds: output/root_cause_20261026/candidate_capture_scores.pt
+    sample: archived commissioning follow-up normal and post-cutoff attack windows
+    arms:
+      source_only: fold source detector and fold source calibration
+      commissioned: earliest 20% reference + next 20% calibration
+    report: [per-fold AUROC and TPR/FPR at 5%, pooled TPR/FPR at 5%, worst-fold
+             AUROC, largest per-capture FPR among captures with >= 10 follow-up normals]
+  calibration_coverage:
+    detector: control on the original split
+    report: realized FPR at 5% for test and audit normal windows split by capture_in_calibration
+    note: partly seen in the 2026-10-27 diagnosis (dates without calibration windows)
+  controls_must_reproduce:
+    - control original-split scores equal output/root_cause_20261026/generalization_scores.pt
+    - control fold scores equal the archived commissioning arms
+
+decision_rule:
+  selection: none on consumed data
+  carry_forward: all four entries, unchanged, into the new-data protocol
+  default_detector: control until the new-data protocol decides
+  allowed_changes: >-
+    software failures only (crash or nonfinite score), recorded as an amendment

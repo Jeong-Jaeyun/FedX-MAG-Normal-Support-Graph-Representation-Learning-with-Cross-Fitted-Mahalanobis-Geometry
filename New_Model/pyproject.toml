@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=78", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fedxmag-next"
+version = "0.1.0"
+description = "Conditional normal-support graph anomaly detector"
+requires-python = ">=3.12,<3.13"
+dependencies = ["numpy>=2.0", "torch>=2.14,<2.15", "scikit-learn>=1.7", "pandas>=2.2"]
+
+[project.optional-dependencies]
+dev = ["pytest>=9.0", "ruff>=0.15"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["runs", "artifacts", "reports"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

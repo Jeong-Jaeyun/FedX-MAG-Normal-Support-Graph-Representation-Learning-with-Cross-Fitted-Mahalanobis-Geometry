@@ -1,0 +1,114 @@
+protocol:
+  name: xiiotid_entity_scoring_audit_band_confirmation
+  version: 1
+  registered_on: "2026-10-25"
+  status: confirmatory_system_check
+  purpose: >-
+    Check, on data no detector has scored, whether entity-level normal-support
+    scoring of the frozen M0/M1 encoders detects attack windows; whether the
+    exploratory conclusions (pooling caused the failure, topology and learning
+    help at the entity level, the L_NS training loss does not help) replicate;
+    and whether the scoring pipeline is free of implementation errors. Encoders,
+    features, and data roles are unchanged; only the scoring rule differs from M1.
+  primary: m0_confirmed_graph|node|top3_mean
+
+base_config: configs/stage1_m0_v3_development.yaml
+data:
+  prepared_dir: data/processed/xiiotid_stage1_v3b_development
+  audit_band_dir: data/processed/xiiotid_stage1_v3b_audit_band
+  roles:
+    fit: prepared/train_normal.pt
+    calibration: prepared/calibration_normal.pt
+    confirm_normal: prepared/audit_normal.pt
+    confirm_attack: audit_band/audit_attack.pt
+    confirm_attack_windows: audit_band/audit_attack_windows.json
+    replay_test_normal: prepared/test_normal.pt
+    replay_test_attack: prepared/test_attack.pt
+  file_sha256:
+    prepared/train_normal.pt: e3cc94714a3719751dd16fa46b044afc7dd37f9bfb0635b00bd4e1e0f338f860
+    prepared/calibration_normal.pt: c2c5abc7979688f420dc05fcd20949fbaf078e1dc52b0c5266856d55ad00c9d4
+    prepared/audit_normal.pt: 51e537f5288d6f62cda62163e949fa55088e5c2abd64a5b624f2edad53837460
+    prepared/test_normal.pt: 774479bffa97ad9fafc00ef0b3d9deb4fbf72fb13687642b0df6b84c4259d77d
+    prepared/test_attack.pt: 4fae1954aff3dca7f108416f7f00a070f591f428735a8e09076e3bf6a41edd1b
+    audit_band/audit_attack.pt: 1ff3ec5960a368fc923860fc7b82542518f3c20e231f9ec546ce5d1782c28bfe
+    audit_band/audit_attack_windows.json: d8ba298ef16297ea8498c6a6517f3f12ed95f9784afd44d257902453cb58f7c1
+
+encoders:
+  m0_confirmed_graph:
+    kind: graph
+    pattern: output/m0/xiiotid_stage1_v3b_confirmation/m0_graph_seed_{seed}.pt
+    seeds: [17, 29, 41, 53, 67]
+  m0_confirmed_shuffled_graph:
+    kind: shuffled_graph
+    pattern: output/m0/xiiotid_stage1_v3b_confirmation/m0_shuffled_graph_seed_{seed}.pt
+    seeds: [17, 29, 41, 53, 67]
+  m0_confirmed_set_context:
+    kind: set_context
+    pattern: output/m0/xiiotid_stage1_v3b_confirmation/m0_set_context_seed_{seed}.pt
+    seeds: [17, 29, 41, 53, 67]
+  m0_recon:
+    kind: graph
+    pattern: output/m1/xiiotid_stage1_m1/m1_m0_recon_seed_{seed}.pt
+    seeds: [17, 29, 41]
+  m1_lw:
+    kind: graph
+    pattern: output/m1/xiiotid_stage1_m1/m1_m1_lw_seed_{seed}.pt
+    seeds: [17, 29, 41]
+  entity_m1_lw:
+    kind: graph
+    pattern: output/diagnosis/entity_m1/entity_m1_lw_seed_{seed}.pt
+    seeds: [17, 29, 41]
+
+# [representation, entity kind, aggregation]; "raw_features" uses standardized
+# features with unavailable values zeroed plus availability flags.
+entity_methods:
+  - [m0_confirmed_graph, node, top3_mean]
+  - [m0_confirmed_graph, node, max]
+  - [m0_confirmed_graph, node, mean]
+  - [m0_confirmed_graph, edge, top3_mean]
+  - [m0_confirmed_shuffled_graph, node, top3_mean]
+  - [m0_confirmed_set_context, node, top3_mean]
+  - [m0_recon, node, top3_mean]
+  - [m1_lw, node, top3_mean]
+  - [entity_m1_lw, node, top3_mean]
+  - [raw_features, node, top3_mean]
+
+pooled_methods:
+  POOLED:m0_confirmed_graph: {encoder: m0_confirmed_graph}
+  POOLED:m1_lw: {encoder: m1_lw}
+  POOLED:handcrafted_combined_lw: {descriptors: combined, estimator: ledoit_wolf}
+  POOLED:handcrafted_structural_lw: {descriptors: structural, estimator: ledoit_wolf}
+  POOLED:raw_attribute_classical: {descriptors: attribute, estimator: empirical}
+
+scoring:
+  entity_estimator: ledoit_wolf
+  entity_reference: clean-view final states of every train-normal entity
+  pooled_embedding_estimator: ledoit_wolf
+  embedding_batch_size: 32
+  fpr_targets: [0.01, 0.05, 0.10]
+  threshold_rule: split-conformal on calibration-normal
+
+hypotheses:
+  H1_entity_scoring_fixes_pooling: [m0_confirmed_graph|node|top3_mean, POOLED:m0_confirmed_graph, greater]
+  H2_learned_entity_beats_handcrafted: [m0_confirmed_graph|node|top3_mean, POOLED:handcrafted_combined_lw, greater]
+  H3a_topology_beats_shuffled: [m0_confirmed_graph|node|top3_mean, m0_confirmed_shuffled_graph|node|top3_mean, greater]
+  H3b_topology_beats_set_context: [m0_confirmed_graph|node|top3_mean, m0_confirmed_set_context|node|top3_mean, greater]
+  H4_learning_beats_raw_features: [m0_confirmed_graph|node|top3_mean, raw_features|node|top3_mean, greater]
+  H5_graph_level_lns_no_entity_effect: [m1_lw|node|top3_mean, m0_recon|node|top3_mean, no_difference]
+  H6_entity_level_lns_hurts: [entity_m1_lw|node|top3_mean, m0_recon|node|top3_mean, less]
+decision_rule: >-
+  For each hypothesis, compute the paired capture-date cluster bootstrap 95%
+  interval of ΔAUROC (seed metrics averaged within each replicate). "greater"
+  is supported if the interval lies above 0, "less" if it lies below 0, and
+  "no_difference" if it contains 0. The calibration check passes if the
+  primary method's realized audit-normal FPR at the calibrated 5% threshold is
+  at most 10%. All methods, strata, and failures are reported.
+
+bootstrap:
+  resamples: 2000
+  seed: 20261027
+
+consistency_checks:
+  C1: audit-band normal windows rebuilt by the frozen preprocessing equal audit_normal.pt (build manifest)
+  C2: pooled detectors reproduce the calibration thresholds frozen in output/m1/xiiotid_stage1_m1/geometry_report.json
+  C3: the primary method replayed on the consumed test reproduces the exploratory per-seed AUROC in output/diagnosis/entity_scoring_exploration.json

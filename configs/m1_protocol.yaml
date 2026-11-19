@@ -1,0 +1,128 @@
+protocol:
+  name: xiiotid_stage1_m1_cross_fitted_mahalanobis
+  version: 1
+  registered_on: "2026-10-24"
+  status: confirmatory
+  hypothesis: >-
+    A graph encoder trained on normal windows only learns a normal-support
+    embedding whose Mahalanobis geometry is stable on unseen normal windows,
+    and adding the cross-fitted normal-support objective changes that geometry
+    relative to reconstruction alone. Discrimination of unseen attacks is
+    measured once on the sealed test partition, never assumed.
+  prerequisite_m0_decision: output/m0/xiiotid_stage1_v3b_confirmation/confirmation_decision.json
+  primary_arm: m1_lw
+
+base_config: configs/stage1_m0_v3_development.yaml
+base_config_sha256: 760adb6c6c856baa84885e4c63b21623cec4bce7ce2c354dedfce2413b3efcb5
+m0_confirmation_dir: output/m0/xiiotid_stage1_v3b_confirmation
+m0_confirmation_seeds: [17, 29, 41, 53, 67]
+
+data:
+  prepared_dir: data/processed/xiiotid_stage1_v3b_development
+  roles:
+    fit: train_normal.pt
+    selection: select_normal.pt
+    calibration: calibration_normal.pt
+    test_normal: test_normal.pt
+    test_attack: test_attack.pt
+  never_opened: [audit_normal.pt]
+  file_sha256:
+    train_normal.pt: e3cc94714a3719751dd16fa46b044afc7dd37f9bfb0635b00bd4e1e0f338f860
+    select_normal.pt: 89a405b96367420b04f3260acc1044576482434449a578b52ac4d6796035644f
+    calibration_normal.pt: c2c5abc7979688f420dc05fcd20949fbaf078e1dc52b0c5266856d55ad00c9d4
+    test_normal.pt: null
+    test_attack.pt: null
+
+training:
+  seeds: [17, 29, 41]
+  batch_size: 64
+  validation_batch_size: 32
+  epochs: 150
+  early_stopping_patience: 15
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  gradient_clip_norm: 5.0
+  validation_mask_seeds: [200003, 200009, 200017, 200023, 200029]
+
+objective_defaults:
+  estimator: ledoit_wolf
+  energy_mode: cross_fitted
+  symmetric: true
+  fixed_alpha: 0.5
+  spectral_floor: 1.0e-6
+  lambda_m: 1.0
+  lambda_c: 1.0
+  lambda_s: 1.0
+  beta_kappa: 1.0
+  beta_rank: 1.0
+  kappa_max: 100.0
+  rank_min: 8.0
+  scale_min: 0.01
+  scale_max: 100.0
+  reconstruction_weight: 1.0
+
+arms:
+  m0_recon:
+    description: Reconstruction only under the M1 schedule (no Mahalanobis term)
+    overrides: {lambda_m: 0.0, lambda_c: 0.0, lambda_s: 0.0}
+    selection: reconstruction
+  m1_empirical:
+    description: Cross-fitted loss, empirical covariance (numerical floor only)
+    overrides: {estimator: empirical}
+    selection: reconstruction
+  m1_fixed:
+    description: Cross-fitted loss, fixed isotropic shrinkage alpha = 0.5
+    overrides: {estimator: fixed}
+    selection: reconstruction
+  m1_lw:
+    description: Cross-fitted loss, Ledoit-Wolf shrinkage (primary)
+    overrides: {}
+    selection: reconstruction
+  m1_oas:
+    description: Cross-fitted loss, OAS shrinkage
+    overrides: {estimator: oas}
+    selection: reconstruction
+  m1_lw_no_cov_reg:
+    description: Primary without shape and scale regularization
+    overrides: {lambda_c: 0.0, lambda_s: 0.0}
+    selection: reconstruction
+  m1_lw_in_sample:
+    description: Primary with in-sample (not cross-fitted) energy
+    overrides: {energy_mode: in_sample}
+    selection: reconstruction
+  ns_only_lw:
+    description: Mahalanobis objective and covariance regularization only, no reconstruction
+    overrides: {reconstruction_weight: 0.0}
+    selection: normal_support
+
+scoring:
+  view: clean_no_artificial_corruption
+  reference_role: fit
+  score_time_estimator: ledoit_wolf
+  fpr_targets: [0.01, 0.05, 0.10]
+  threshold_rule: split_conformal_on_calibration
+  replay_fixed_alpha: 0.5
+
+baselines:
+  descriptor_methods:
+    handcrafted_structural_lw: {descriptors: structural, estimator: ledoit_wolf}
+    raw_attribute_classical: {descriptors: attribute, estimator: empirical}
+    raw_attribute_lw: {descriptors: attribute, estimator: ledoit_wolf}
+    handcrafted_combined_lw: {descriptors: combined, estimator: ledoit_wolf}
+  m0_confirmed_embeddings: [graph, set_context, shuffled_graph]
+
+geometry:
+  split_stability_resamples: 20
+  split_stability_seed: 31337
+
+test:
+  bootstrap_resamples: 2000
+  bootstrap_seed: 20261025
+  primary_comparisons:
+    - [m1_lw, m0_recon]
+    - [m1_lw, handcrafted_combined_lw]
+    - [m0_recon, handcrafted_combined_lw]
+    - [m1_lw, m0_confirmed_graph]
+    - [m0_confirmed_graph, m0_confirmed_shuffled_graph]
+    - [m0_confirmed_graph, m0_confirmed_set_context]
+  per_category_fpr_target: 0.05

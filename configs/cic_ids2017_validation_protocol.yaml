@@ -1,0 +1,165 @@
+# Independent confirmation, on CIC-IDS2017, of the hypotheses that the TON_IoT failure
+# analysis produced: thresholds from the most recent vetted normal windows keep the
+# false-positive target, the detector then detects more attack windows than traffic
+# volume, and its thresholds age more slowly than volume's. Written before any
+# CIC-IDS2017 feature distribution by label, detector score, or metric existed;
+# hash-registered before featurization. Seen beforehand: the conversion manifests, the
+# layout census (label-free, plus records touching addresses named in the published
+# schedule), and per-capture record and window counts by label
+# (output/cic_ids2017_census). Every method setting comes from consumed data
+# (X-IIoTID, TON_IoT); nothing here is tuned on CIC-IDS2017.
+
+protocol:
+  name: cic_ids2017_fresh_calibration_validation
+  date: "2026-11-01"
+  status: confirmatory_on_untouched_data
+  question: >-
+    On a third dataset never used for any choice, (1) do thresholds from the 20 most
+    recent vetted normal windows keep the 5% false-positive target, (2) does the
+    detector then detect more attack windows than the record count under the same
+    thresholds policy, and (3) do the detector's thresholds age more slowly than the
+    record count's?
+  development: >-
+    Policy from the TON_IoT root-cause analysis (docs/ton_iot_fpr_root_cause_2026-11-01.md)
+    and the method-development probes (docs/method_development_2026-11-01.md,
+    output/calibration_policy_probes/report.json): recent vetted m=20, d=0 gave FPR 4.8%
+    with TPR 94.9%; delays of 30 and 120 minutes gave 7.1% and 9.9% for the detector
+    versus 10.0% and 17.1% for the record count; size-conditional and label-free
+    alert-gated policies did not control FPR. On X-IIoTID the detector beat the record
+    count (AUROC 0.930 versus 0.554); on TON_IoT they tied.
+  design_choice: >-
+    Natural windows. The support census found 377 and 374 attack-free windows on the
+    two attack days and attack episodes of 3 to 59 windows, so attack-free windows are
+    real negatives and can be vetted; no counterfactual background is needed for the
+    primary claims.
+
+data:
+  captures: data/CIC-IDS2017/{Monday,Thursday,Friday}-WorkingHours.pcap (pcapng, Ethernet, microseconds)
+  capture_integrity: >-
+    Thursday and Friday MD5 equal the published .md5 files; Monday has no published
+    file (observed 8525733283c2c5f98891a0dca036e7c7)
+  conversion: >-
+    fedxmag.pcap_conn (our Zeek-style implementation: bidirectional 5-tuple connections,
+    300/60 s inactivity, Zeek conn_state rules, sequence-span TCP bytes, payload or
+    port service) to data/processed/cic_ids2017_conn/<day>.csv; manifests bind each
+    capture MD5 and table SHA-256
+  labels: >-
+    fedxmag.cic_ids2017.SCHEDULE from the published attack schedule (UNB CIC page),
+    local time ADT (UTC-3, fixed by the capture start times): a record is an attack
+    record if one endpoint is an attacker and the other a victim of an entry and its
+    start second falls between the entry's first minute and the end of its last
+    minute; inbound entries list the NAT address 172.16.0.1 (published NAT path, no
+    Monday traffic); Thursday and Friday records touching attack infrastructure outside
+    every entry are removed as unknown status (Thursday 1,189, Friday 4,196 records);
+    Monday is benign by definition
+  labelled_tables: data/processed/cic_ids2017_conn/labelled/<day>.csv (label, type appended)
+  census: [output/cic_ids2017_census/layout.json, output/cic_ids2017_census/label.json, output/cic_ids2017_census/support.json]
+  row_rules: frozen TON_IoT reader fedxmag.ton_iot.read_ton_records (label validation, exact-row dedup, timestamp, endpoint, self-relation rules)
+  capture: local calendar day ADT (fedxmag.cic_ids2017.capture_of)
+  window: 60 s, UTC-minute aligned, closed per capture
+  window_label: attack if any kept record has label 1; otherwise natural normal
+  graph_features: frozen v3b builder through fedxmag.ton_iot.TonRecords.view (as TON_IoT)
+  flow_features: the 17 flow-context columns through the same view (conn_state flags, '-' service as other)
+  label_use: window labels, vetting of natural normal windows, and evaluation; never a detector input
+
+roles:
+  source_capture: "2017-07-03"
+  source_split: Monday windows in time order split 50/10/10/15/15 into train / selection / audit / calibration / test
+  target_captures: ["2017-07-06", "2017-07-07"]
+  evaluation: >-
+    every target window scored once with all its records; negatives are natural normal
+    windows, positives attack windows; a policy evaluates only the windows it supports
+  vetted_stream: the natural normal windows of the same target capture, in time order
+  background_sample: label-0 records of an attack window (secondary S5 only)
+
+method_fixed:
+  detector: raw_node_knn_plus_flow_knn_top3_select_q95_max, flow variant all, k 20
+  fit: graph scaler on Monday train; kNN references on Monday train; fusion scales on Monday selection; static thresholds on Monday calibration
+  commissioning: none on target days (the reference is the same network's vetted normal day)
+  threshold_policy_primary:
+    name: recent_vetted_m20_d0
+    rule: >-
+      for target window t, the split-conformal threshold (rank ceil((m+1)(1-alpha)), at
+      alpha 5% the maximum of 20) over the scores of the last m = 20 natural normal
+      windows of the same capture that start before t - d, d = 0 minutes (window t
+      itself never included); windows with fewer than 20 such windows are unsupported
+    vetting_assumption: natural normal windows are known to be normal as soon as they end (d = 0); delays model vetting latency
+  fpr_target_primary: 0.05
+  fpr_targets_descriptive: [0.10]  # 1% needs at least 99 vetted windows; unsupported at m = 20
+  unchanged: [graph scaler, flow scaler, fusion scales, k, references]
+
+comparators:
+  record_count: log1p(kept records in the window), identical policy and support
+  endpoint_count: log1p(endpoints in the window), identical policy; descriptive
+  combined: >-
+    max(fused / q95, record_count / q95), q95 of each on Monday calibration; identical
+    policy; secondary (S3)
+
+metrics:
+  pooled: sums of true and false positives over the supported evaluation windows of both target captures
+  per_capture: [tpr, fpr, positives, negatives, auroc]
+  ranking: pooled AUROC and the oracle TPR at an evaluation FPR of 5% (descriptive)
+  safety_capture_minimum: 50  # evaluation negatives a capture needs for the per-capture FPR condition
+  bootstrap:
+    unit: local clock hour within a target capture (blocks holding a supported evaluation window)
+    resamples: 2000
+    seed: 20261102
+    statistic: pooled TPR difference with every per-window threshold held fixed
+  binomial: one-sided exact test of H0 pooled FPR <= 5% (upper tail)
+
+primary_claims:
+  H1_fresh_calibration_safety:
+    score: detector (fused), primary policy
+    holds: binomial p >= 0.05 AND every target capture with >= 50 evaluation negatives realizes FPR <= 10%
+  H2_beyond_volume:
+    comparison: detector TPR minus record_count TPR at the 5% target, primary policy, same windows
+    supported: H1 holds and difference > 0 with bootstrap 95% lower bound > 0
+    inconclusive: H1 holds, difference > 0, lower bound <= 0
+    not_supported: any other outcome
+  validated: H1 holds and H2 supported (intersection-union, no multiplicity adjustment)
+
+secondary:
+  H3_staleness:
+    delays_minutes: [0, 15, 30, 60, 120]
+    windows: natural normal windows supported at every delay
+    statistic: (record_count FPR at 120 - at 0) - (detector FPR at 120 - at 0)
+    supported: statistic > 0 with block-bootstrap 95% lower bound > 0
+    descriptive: FPR and TPR at every delay for detector, record_count, combined
+  S1_attack_types: >-
+    TPR per attack type (windows containing it), detector and record_count, primary
+    policy; strata fixed from the published flow counts: low volume {web_brute_force,
+    web_xss, web_sql_injection, botnet}, high volume {portscan, ddos}, infiltration
+    alone (its second step is a scan); stratum TPR differences with bootstrap 95%
+    intervals, descriptive
+  S2_static_source_thresholds: >-
+    Monday calibration thresholds (split-conformal) on every target window: pooled and
+    per-capture TPR and FPR; Monday audit and test FPR
+  S3_variants: memory 60 at d 0 (detector, record_count); combined score under the primary policy
+  S4_label_free_alert_gated: >-
+    buffer seeded with the first 20 natural normal windows of each capture; every later
+    window (natural or attack) enters the 20-window buffer only if not alerted; report
+    TPR, FPR, and whether the threshold path is non-increasing (Proposition 1)
+  S5_background_contrast: label-0 records of each attack window scored against that window's primary threshold; FPR
+  S6_channels: raw_node and flow scores, each with its own primary-policy thresholds; AUROC, TPR, FPR
+  S7_entities: >-
+    within attack windows, AUROC of raw-node entity distances for endpoints of an attack
+    record against the other endpoints (pooled and mean per window with both classes),
+    with the endpoint's record count as the volume comparator
+
+integrity_checks_before_scoring:
+  - conversion manifests and labelled tables equal output/cic_ids2017_census/label.json
+  - adapter ingestion counts equal output/cic_ids2017_census/support.json
+  - per-capture window, natural normal, and attack window counts equal the census
+  - Monday windows all normal; background samples label-0 only; attack windows hold attack records
+  - every flow matrix finite and every graph valid under the v3b schema
+
+limitations_fixed_in_advance:
+  - labels come from the published schedule by address and time; benign traffic between listed endpoints inside an interval counts as attack, and unscheduled attack-infrastructure traffic is removed rather than labelled
+  - the infiltration second step labels all traffic between 192.168.10.8 and other LAN hosts in 15:04-15:45, including its normal traffic to the domain controller
+  - connection records come from our Zeek-style converter, not Zeek; TON_IoT and CIC-IDS2017 share column semantics, not the implementation
+  - d = 0 assumes vetting as soon as a window ends; it is an upper bound on deployable freshness, and the delay curve quantifies the cost
+  - two target captures from one testbed network with profile-generated benign traffic; the hour-block bootstrap treats hours as exchangeable within days
+  - the Tuesday and Wednesday captures are not available locally
+
+amendments: software failures only (crash or nonfinite score), recorded before any rerun; no setting changes after any score exists
+outputs: output/cic_ids2017_validation_20261101

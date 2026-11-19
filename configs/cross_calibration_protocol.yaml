@@ -1,0 +1,80 @@
+# Time-block cross-fitted calibration for vetted-normal commissioning.
+# Written and hash-registered before any cross-fitted fold score was computed.
+# All X-IIoTID bands are consumed: this is a pre-specified exploratory check,
+# not confirmation, and it cannot establish deployment validity.
+
+protocol:
+  name: cross_fitted_commissioning_calibration_check
+  date: "2026-10-27"
+  status: pre_specified_exploratory_on_consumed_data
+  question: >-
+    Given exactly the same vetted commissioning windows, does time-block
+    cross-fitted calibration recover detections lost to small target
+    calibration sets without exceeding the 5% false-positive target?
+  motivation: >-
+    In the 2026-10-26 commissioning study the target calibration sets held
+    26-105 windows, so the 5% threshold was the largest or near-largest
+    calibration score (folds 1 and 4 realized 0% FPR with 29.1% and 14.8% TPR).
+
+data:
+  capture_folds: output/root_cause_20261026/candidate_capture_scores.pt
+  commissioning_study: output/root_cause_20261026/normal_commissioning_scores.pt
+  commissioning_windows: >-
+    archived target reference + target calibration windows of each fold
+    (per supported capture the earliest 40% of its normal windows)
+  evaluation: >-
+    archived later target normal windows and post-cutoff attack windows,
+    identical for every arm
+
+method_fixed:
+  detector: raw_node_knn_plus_flow_knn_top3_select_q95_max
+  k: 20
+  source_fit: >-
+    per fold, graph scaler refit on fold-train raw graphs; detector fit on
+    fold train/selection/calibration exactly as in commission-replay
+  unchanged_during_commissioning: [graph scaler, flow scaler, fusion scales, k]
+
+arms:
+  baseline:
+    description: reference = earliest 20%, calibration = next 20% (archived arm)
+    calibration: disjoint
+  primary:
+    description: reference = all commissioning windows, time-block cross-fitted calibration
+    blocks: 5
+  sensitivity:
+    description: same as primary with fewer, longer blocks (less edge leakage, more conservative)
+    blocks: 2
+
+blocking: >-
+  per capture, windows sorted by window_start_ns are split into contiguous
+  blocks (numpy array_split); block b is pooled across captures and scored
+  against the source reference plus every other block
+
+fpr_targets: [0.01, 0.05, 0.10]
+primary_fpr_target: 0.05
+unsupported_targets: reported as unsupported, never capped at the largest score
+
+metrics:
+  per_fold: [auroc, tpr, fpr, threshold, calibration_windows, per_date_fpr]
+  pooled: >-
+    sum of true positives / sum of evaluated attacks and sum of false
+    positives / sum of evaluated normals over the five folds
+  bootstrap:
+    unit: capture (each capture belongs to exactly one fold)
+    resamples: 2000
+    seed: 20261027
+    statistic: pooled TPR difference (arm - baseline) at the 5% target
+    note: thresholds held fixed (conditional on the commissioning data)
+
+decision_rule:
+  applies_to: primary
+  supported: >-
+    pooled TPR difference > 0 with bootstrap 95% lower bound > 0, AND the
+    one-sided exact binomial test of pooled FPR <= 5% gives p >= 0.05, AND no
+    fold realizes FPR > 10%
+  inconclusive: pooled TPR difference > 0 and the safety conditions hold, but the lower bound <= 0
+  not_supported: any other outcome
+  sensitivity_arm: reported descriptively; it does not change the verdict
+  fixed: no block count, split, or rule is changed after seeing results
+
+outputs: output/cross_calibration_20261027
